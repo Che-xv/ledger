@@ -16,7 +16,9 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/example/ledger
           mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res/drawable
           cp index.html app/src/main/assets/index.html
+          cp icon.png app/src/main/res/drawable/icon.png
 
           cat > settings.gradle << 'EOF'
           pluginManagement {
@@ -72,6 +74,11 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
+              sourceSets {
+                  main {
+                      res.srcDirs = ['src/main/res']
+                  }
+              }
               lint {
                   abortOnError false
               }
@@ -84,7 +91,7 @@ jobs:
               <application
                   android:allowBackup="true"
                   android:label="记账本"
-                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:icon="@drawable/icon"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar"
                   android:hardwareAccelerated="true"
                   android:usesCleartextTraffic="true">
@@ -152,9 +159,8 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 安装 SDK 组件（使用系统自带）
+      - name: 安装 SDK 组件
         run: |
-          # 直接使用 GitHub 环境预装的 SDK，避免被墙
           if [ -z "$ANDROID_HOME" ]; then export ANDROID_HOME=/usr/local/lib/android/sdk; fi
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
