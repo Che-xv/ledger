@@ -152,13 +152,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 安装 SDK 组件
+      - name: 安装 SDK 组件（使用系统自带）
         run: |
+          # 直接使用 GitHub 环境预装的 SDK，避免被墙
+          if [ -z "$ANDROID_HOME" ]; then export ANDROID_HOME=/usr/local/lib/android/sdk; fi
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" > /dev/null
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: 安装 Gradle
         uses: gradle/actions/setup-gradle@v4
