@@ -291,7 +291,6 @@ function load(){
         D.records = Array.isArray(o.records) ? o.records : [];
         D.budget = Number(o.budget) || 0;
         D.customCats = o.customCats || { '支出': [], '收入': [] };
-        // 兼容旧版字符串账户
         if (Array.isArray(o.accounts) && o.accounts.length){
           D.accounts = o.accounts.map(function(a){
             return typeof a === 'string' ? { name: a, initBalance: 0 } : a;
@@ -315,7 +314,6 @@ function save(){
   catch(e){ alert('保存失败，手机存储可能已满'); }
 }
 
-// 计算某账户的实时余额 = 初始余额 + 总收入 - 总支出
 function getAccBalance(accName){
   var acc = null;
   for (var i=0;i<D.accounts.length;i++) if (D.accounts[i].name===accName) { acc = D.accounts[i]; break; }
@@ -634,15 +632,28 @@ function renderBudget(){
   var p = state.month.split('-').map(Number);
   var daysInMonth = new Date(p[0], p[1], 0).getDate();
   var now = new Date();
-  var isCur = (now.getFullYear()===p[0] && now.getMonth()+1===p[1]);
-  var dayNow = isCur ? now.getDate() : daysInMonth;
-  var daysLeft = Math.max(1, daysInMonth - dayNow + 1);
+  var curYear = now.getFullYear(), curMonth = now.getMonth()+1, curDay = now.getDate();
+  
+  var isCur = (curYear === p[0] && curMonth === p[1]);
+  var isPast = (p[0] < curYear) || (p[0] === curYear && p[1] < curMonth);
+  
+  var daysLeft = 0;
+  var dailyText = '';
+  
+  if (isPast) {
+    dailyText = '已结束';
+  } else if (isCur) {
+    daysLeft = Math.max(1, daysInMonth - curDay + 1);
+    dailyText = money(left > 0 ? left / daysLeft : 0);
+  } else {
+    daysLeft = daysInMonth;
+    dailyText = money(left > 0 ? left / daysLeft : 0);
+  }
 
   var html = '';
   if (D.budget > 0){
     var left = D.budget - exp;
     var pct = exp / D.budget * 100;
-    var daily = left > 0 ? left / daysLeft : 0;
     html += '<div class="card">'
       + '<div class="card-title">本月预算</div>'
       + '<div class="big-num" style="color:' + (left<0?'var(--exp)':'var(--main)') + '">'
@@ -653,7 +664,7 @@ function renderBudget(){
       + '<div class="b-grid">'
       +   '<div><span class="bl">已支出</span><span class="bv" style="color:var(--exp)">' + money(exp) + '</span></div>'
       +   '<div><span class="bl">剩余</span><span class="bv">' + money(Math.max(0,left)) + '</span></div>'
-      +   '<div><span class="bl">日均可用</span><span class="bv">' + money(daily) + '</span></div>'
+      +   '<div><span class="bl">日均可用</span><span class="bv">' + dailyText + '</span></div>'
       + '</div>'
       + '<button class="btn-main" id="setBudgetBtn">修改预算</button>'
       + '</div>';
@@ -748,13 +759,13 @@ function renderMe(){
 
 function showAccounts(){
   var html = '<h3>账户管理</h3>'
-    + '<p>点击「余额」可以设置该账户的初始金额。记账时会自动计算余额。</p>';
+    + '<p>点击右侧数字可设置该账户的当前余额。记账时会自动计算。</p>';
   D.accounts.forEach(function(a,i){
     var bal = getAccBalance(a.name);
-    html += '<div class="acc-item">'
-      + '<span class="an">' + esc(a.name) + '</span>'
-      + '<span class="ab">余额 ' + money(bal) + '</span>'
-      + '<button class="del" data-i="' + i + '">删除</button>'
+    html += '<div class="acc-item" style="display:flex;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);">'
+      + '<span class="an" style="flex:1;font-size:14px;">' + esc(a.name) + '</span>'
+      + '<input class="ab-edit" type="number" inputmode="decimal" data-i="' + i + '" value="' + bal + '" style="width:80px;text-align:right;border:1px solid var(--line);border-radius:4px;padding:4px;font-size:12px;outline:none;margin-right:8px;background:#fafbfc;">'
+      + '<button class="del" data-i="' + i + '" style="color:#ff4d4f;background:none;border:none;font-family:inherit;font-size:13px;padding:4px 0;">删除</button>'
       + '</div>';
   });
   html += '<input id="newAcc" placeholder="新账户名称，如：招行信用卡" style="margin-top:12px">'
@@ -764,21 +775,60 @@ function showAccounts(){
 
   openModal(html, function(){
     document.getElementById('mCancel').onclick = closeModal;
-    
-    // 修复删除逻辑，使用更稳妥的事件绑定
+
+    // 1. 处理余额修改：直接改输入框，失去焦点时自动保存
+    var edits = document.querySelectorAll('#modalBox .ab-edit');
+    edits.forEach(function(inp){
+      inp.onchange = function(){
+        var idx = parseInt(this.getAttribute('data-i'),10);
+        var newBal = parseFloat(this.value);
+        if (isNaN(newBal)) return;
+        var acc = D.accounts[idx];
+        // 反推初始余额 = 目标余额 - (总收入 - 总支出)
+        var net = 0;
+        D.records.forEach(function(r){
+          if (r.account === acc.name){
+            if (r.type === '收入') net += Number(r.amount);
+            else net -= Number(r.amount);
+          }
+        });
+        acc.initBalance = newBal - net;
+        save();
+        renderAll();
+        // 提示保存成功
+        var t = this;
+        t.style.borderColor = '#22c39a';
+        setTimeout(function(){ t.style.borderColor = '#eceef1'; }, 1000);
+      };
+      inp.onblur = function(){ this.onchange(); };
+    });
+
+    // 2. 处理删除：改为两次点击确认，避免系统弹窗被拦截
     var dels = document.querySelectorAll('#modalBox .del');
     dels.forEach(function(btn){
       btn.onclick = function(){
-        var idx = parseInt(this.getAttribute('data-i'),10);
-        var nm = D.accounts[idx].name;
-        if (!confirm('删除账户「' + nm + '」？\n已有记录不受影响。')) return;
-        D.accounts.splice(idx,1);
-        save();
-        closeModal();
-        renderAll();
+        if (this.dataset.confirm === '1') {
+          var idx = parseInt(this.getAttribute('data-i'),10);
+          var nm = D.accounts[idx].name;
+          D.accounts.splice(idx,1);
+          save();
+          showAccounts(); // 重新加载弹窗列表
+          renderAll();
+        } else {
+          this.dataset.confirm = '1';
+          this.textContent = '确认删除';
+          var self = this;
+          setTimeout(function(){
+            if (self.dataset.confirm === '1') {
+              self.dataset.confirm = '0';
+              self.textContent = '删除';
+            }
+          }, 3000);
+        }
       };
     });
 
+    // 3. 处理添加
     document.getElementById('mOk').onclick = function(){
       var v = document.getElementById('newAcc').value.trim();
       if (!v){ alert('请输入账户名称'); return; }
@@ -789,31 +839,8 @@ function showAccounts(){
       save();
       closeModal();
       renderAll();
-      alert('已添加账户：' + v + '\n去设置一下初始余额吧！');
+      alert('已添加账户：' + v);
     };
-    
-    // 点击余额弹窗设置
-    var items = document.querySelectorAll('#modalBox .acc-item');
-    items.forEach(function(item, idx){
-      var balSpan = item.querySelector('.ab');
-      if (balSpan){
-        balSpan.style.cursor = 'pointer';
-        balSpan.onclick = function(){
-          var acc = D.accounts[idx];
-          var curBal = getAccBalance(acc.name);
-          var newBal = prompt('设置「' + acc.name + '」的初始余额：', acc.initBalance);
-          if (newBal !== null){
-            var val = parseFloat(newBal);
-            if (!isNaN(val)){
-              acc.initBalance = val;
-              save();
-              closeModal();
-              renderAll();
-            }
-          }
-        };
-      }
-    });
   });
 }
 
